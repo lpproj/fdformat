@@ -1,0 +1,68 @@
+# makefile for LSI-C 86
+D=\ 
+O=obj
+A=lib
+X=.exe
+
+RM_F = deltree /y
+CP_F = copy /y
+
+.SUFFIXES:
+.SUFFIXES: .com .exe .obj .c .nas .asm
+
+
+
+BOOTSRCDIR=../../fdkernel/nec98/boot
+
+CC=lcc
+CFLAGS = -w1 -O -y0
+AS=nasm
+AFLAGS = -f obj $(AFLAGS_PLATFORM)
+LD=lcc
+LDFLAGS = -lintlib
+
+COMPILE_TARGET_CC = $(CC) -c $(CFLAGS) -o $@ $<
+
+COMPRESS=upx -9 --8086 --no-color
+#COMPRESS=echo (skip upx)
+
+
+all: fdformat.exe
+
+clean:
+	-$(RM_F) fdformat.exe $(OBJS)
+
+
+OBJS = fdformat.$(O) d16fmem.$(O) d16file.$(O)
+
+
+fdformat.exe: $(OBJS)
+	$(LD) -o $@ $(OBJS) $(LDFLAGS)
+	$(COMPRESS) $@
+
+fdformat.$(O): fdformat.c bootdumy.h b_fat12f.h d16fmem.h
+	$(COMPILE_TARGET_CC)
+
+d16fmem.$(O): d16fmem.c d16fmem.h
+	$(COMPILE_TARGET_CC)
+
+d16file.$(O): d16file.c d16file.h d16fmem.h
+	$(COMPILE_TARGET_CC)
+
+int86x2.$(O): int86x2.nas
+	$(AS) $(AFLAGS) -o $@ $<
+
+
+bootdumy.h: bootdumy.asm bin2list$(X)
+	nasm -f bin -o bootdumy.bin bootdumy.asm
+	./bin2list bootdumy.bin $@
+
+b_fat12f.h: $(BOOTSRCDIR)/boot.asm
+	nasm -f bin -o b_fat12f.bin -O3 -DNEC98 -DISFAT12 -DNEC98FDD $<
+	./bin2list b_fat12f.bin $@
+
+bin2list$(X): bin2list.c
+	$(CC) -o $@ $< $(LDFLAGS)
+
+
+

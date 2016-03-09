@@ -1,0 +1,67 @@
+# makefile for wmake
+D=\ 
+O=obj
+A=lib
+X=.exe
+
+RM_F = rm -f
+CP_F = copy
+
+BOOTSRCDIR=../../fdkernel/nec98/boot
+
+TARGET_CC=wcl
+TARGET_CFLAGS = -zq -s -wx -0 -zp1 -ors -ms -zk0 -fr $(CFLAGS_PLATFORM)
+AS=nasm
+AFLAGS = -f obj $(AFLAGS_PLATFORM)
+TARGET_LD=wcl
+TARGET_LDFLAGS = -zq -ms -bcl=dos
+
+COMPILE_TARGET_CC = $(TARGET_CC) -c $(TARGET_CFLAGS) -fo=$^@ $[@
+
+CC=owcc
+CFLAGS=
+LDFLAGS=
+
+COMPRESS=upx -9 --8086 --no-color
+#COMPRESS=echo (skip upx)
+
+
+all: fdformat.exe .SYMBOLIC
+
+clean: .SYMBOLIC
+	-$(RM_F) fdformat.exe $(OBJS) *.err
+
+
+OBJS = fdformat.$(O) d16fmem.$(O) d16file.$(O) int86x2.$(O)
+
+
+fdformat.exe: $(OBJS)
+	$(TARGET_LD) -fe=$^@ $(OBJS) $(TARGET_LDFLAGS)
+	$(COMPRESS) $^@
+
+fdformat.$(O): fdformat.c bootdumy.h b_fat12f.h d16fmem.h
+	$(COMPILE_TARGET_CC)
+
+d16fmem.$(O): d16fmem.c d16fmem.h
+	$(COMPILE_TARGET_CC)
+
+d16file.$(O): d16file.c d16file.h d16fmem.h
+	$(COMPILE_TARGET_CC)
+
+int86x2.$(O): int86x2.nas
+	$(AS) $(AFLAGS) -o $^@ $[@
+
+
+bootdumy.h: bootdumy.asm bin2list$(X)
+	nasm -f bin -o bootdumy.bin bootdumy.asm
+	.$(D)bin2list bootdumy.bin $^@
+
+b_fat12f.h: $(BOOTSRCDIR)$(D)boot.asm
+	nasm -f bin -o b_fat12f.bin -O3 -DNEC98 -DISFAT12 -DNEC98FDD $[@
+	.$(D)bin2list b_fat12f.bin $^@
+
+bin2list$(X): bin2list.c
+	$(CC) -o $@ $< $(LDFLAGS)
+
+
+

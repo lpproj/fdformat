@@ -1,0 +1,16 @@
+bin2list.c	public domain
+bootdumy.asm	the ZLib license (boot sector for non-system disk)
+d16file.c	public domain
+d16file.h	public domain
+d16fmem.c	public domain
+d16fmem.h	public domain
+fdformat.c	the ZLib license
+int86x2.h	public domain
+int86x2.nas	public doamin
+Makefile.lsi	public domain
+Makefile.wc	public domain
+
+... and use FreeDOS(98) bootloader for option /S.
+FreeDOS(98) is disributed under GPLv2 (or later).
+https://github.com/lpproj/fdkernel
+

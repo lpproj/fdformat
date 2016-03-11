@@ -11,8 +11,8 @@ CP_F = copy /y
 .SUFFIXES: .com .exe .obj .c .nas .asm
 
 
-
-BOOTSRCDIR=../../fdkernel/nec98/boot
+#FD98_BOOTASM=../../fdkernel/nec98/boot/boot.asm
+FD98_BOOTASM=./fd98/boot/boot.asm
 
 CC=lcc
 CFLAGS = -w1 -O -y0
@@ -57,7 +57,7 @@ bootdumy.h: bootdumy.asm bin2list$(X)
 	nasm -f bin -o bootdumy.bin bootdumy.asm
 	./bin2list bootdumy.bin $@
 
-b_fat12f.h: $(BOOTSRCDIR)/boot.asm
+b_fat12f.h: $(FD98_BOOTASM)
 	nasm -f bin -o b_fat12f.bin -O3 -DNEC98 -DISFAT12 -DNEC98FDD $<
 	./bin2list b_fat12f.bin $@
 

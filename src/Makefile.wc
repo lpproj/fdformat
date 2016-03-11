@@ -7,7 +7,8 @@ X=.exe
 RM_F = rm -f
 CP_F = copy
 
-BOOTSRCDIR=../../fdkernel/nec98/boot
+#FD98_BOOTASM=../../fdkernel/nec98/boot/boot.asm
+FD98_BOOTASM=./fd98/boot/boot.asm
 
 TARGET_CC=wcl
 TARGET_CFLAGS = -zq -s -wx -0 -zp1 -ors -ms -zk0 -fr $(CFLAGS_PLATFORM)
@@ -27,6 +28,10 @@ COMPRESS=upx -9 --8086 --no-color
 
 
 all: fdformat.exe .SYMBOLIC
+
+allclean: .SYMBOLIC
+	-$(RM_F) fdformat.exe $(OBJS) *.err
+	-$(RM_F) bin2list$(X) b_fat12f.h b_fat12f.bin bootdumy.h bootdumy.bin
 
 clean: .SYMBOLIC
 	-$(RM_F) fdformat.exe $(OBJS) *.err
@@ -56,7 +61,7 @@ bootdumy.h: bootdumy.asm bin2list$(X)
 	nasm -f bin -o bootdumy.bin bootdumy.asm
 	.$(D)bin2list bootdumy.bin $^@
 
-b_fat12f.h: $(BOOTSRCDIR)$(D)boot.asm
+b_fat12f.h: $(FD98_BOOTASM)
 	nasm -f bin -o b_fat12f.bin -O3 -DNEC98 -DISFAT12 -DNEC98FDD $[@
 	.$(D)bin2list b_fat12f.bin $^@
 

@@ -172,6 +172,28 @@ unsigned char mygetc(int do_flush)
   return r.h.al;
 }
 
+const unsigned char *fd_bios_errmsg(int err)
+{
+  const unsigned char *m = "その他のエラー";
+  
+  if (err == 0) return "";
+  switch((err >> 8) & 0xf0) {
+    case 0x10: m = "DDAM検出"; break;
+    case 0x20: m = "DMA境界エラー"; break;
+    case 0x30: m = "セクタ位置範囲指定エラー"; break;
+    case 0x40: m = "装置指定が無効"; break;
+    case 0x50: m = "ディスクオーバーラン"; break;
+    case 0x60: m = "ディスクがありません"; break;
+    case 0x70: m = "書き込み保護"; break;
+    case 0x90: m = "装置が未接続"; break;
+    case 0xa0: case 0xb0: m = "CRCエラー"; break;
+    case 0xc0: m = "セクタが見つからない"; break;
+    case 0xd0: m = "バッドシリンダ"; break;
+    case 0xe0: case 0xf0: m = "アドレスマークが見つからない"; break;
+  }
+  
+  return m;
+}
 
 unsigned char drive0_to_daua(unsigned char drive0)
 {
@@ -592,7 +614,7 @@ int format_fd_unit_bpb(unsigned char daua, const BPBCORE *bpb, int do_verify, un
       sr.es = FP_SEG(table);
       int86x2(0x1b, &r, &r, &sr);
       if (r.x.cflag) {
-        fprintf(stderr, " ... error!\n");
+        fprintf(stderr, " ... error! (%s)\n", fd_bios_errmsg(r.x.ax));
         return r.x.ax;
       }
       if (do_verify) {
@@ -608,7 +630,7 @@ int format_fd_unit_bpb(unsigned char daua, const BPBCORE *bpb, int do_verify, un
         sr.es = FP_SEG(table);
         int86x2(0x1b, &r, &r, &sr);
         if (r.x.cflag) {
-          fprintf(stderr, " ... verify error!\n");
+          fprintf(stderr, " ... verify error! (%s)\n", fd_bios_errmsg(r.x.ax));
           return r.x.ax;
         }
       }
@@ -638,7 +660,7 @@ int format_fd_unit(unsigned char daua, int size_option, int need_system_transfer
     fd_recalibrate(daua);
     rc = fd_build_fat12(daua, fi->bpb, need_system_transfer);
     if (rc != 0) {
-      fprintf(stderr, "ファイルシステム作成エラー\n");
+      fprintf(stderr, "ファイルシステム作成エラー (%s)\n", fd_bios_errmsg(rc));
     }
   }
   
@@ -799,7 +821,7 @@ void put_usage(void)
     "  /4       1.44Mディスクを初期化します\n"
 #if 1
     "  /F:size  初期化ディスク容量を数値などで指定します\n"
-    "           (size=640, 720, 2DD, 1.2, 2HC, 1.23, 2DD, 1.44)\n"
+    "           (size=640, 720, 2DD, 1.2, 2HC, 1.23, 2HD, 1.44)\n"
 #else
     "  /F:640   \n"
     "  /F:720   \n"

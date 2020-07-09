@@ -26,12 +26,20 @@
 ; Cambridge, MA 02139, USA.
 ;
 
+%define FD_DBLBUF 1
 
 LOADSEG		equ	0060h
 FATBUF		equ	2000h	; offset of temporary buffer for FAT chain
 
-_SS		equ	1400h
-_SP		equ	((1f00h - _SS) << 4) - 1
+FDBUFSEG	equ	1E00h
+FDBUFLENGTH	equ	2048
+_SS		equ	(FDBUFSEG + (FDBUFLENGTH / 16))
+STACKLENGTH	equ	256
+STACKLIMITSEG	equ	1f00h
+%if ((_SS + ((STACKLENGTH+15) / 16)) > STACKLIMITSEG)
+  %error stack for FD-loader not enough
+%endif
+_SP		equ	(STACKLENGTH)
 DISK_BOOT	equ	0584h	; seg=0000h
 BOOTPART_SCRATCHPAD	equ	03feh;
 
@@ -40,6 +48,17 @@ BOOTPART_SCRATCHPAD	equ	03feh;
 segment .text
 	align	1
 	org	0
+
+Base_of_code:
+
+%macro _org 1
+  %if (($ - Base_of_code) > %1)
+    %error _org: too much code to fit within %1
+  %endif
+  %if ($ - Base_of_code < %1)
+    times (%1 - ($ - Base_of_code)) db 0
+  %endif
+%endmacro
 
 bsJump:		jmp	short real_start
 		nop
@@ -113,9 +132,37 @@ real_start:
 ;		int	18h
 
 		cld
+		cli
+%ifdef ISFAT16
+; 3800:0000 IPL
+;(3800:0400) limit of local stack
+;(3800:2000) bottom of local stack
+; 3800:2000 FATBUF (cluster list)
+;
+;(3800:8000 bottom of 256K memory)
+RELOCSEG	equ	3800h
+		push	si
+		push	cs
+		pop	ds
+		xor	si, si
+		mov	ax, RELOCSEG
+		mov	es, ax
+		mov	di, si
+		mov	cx, 1024 / 2
+		rep	movsw
+		pop	si
+		jmp	word RELOCSEG:cont
+
+cont:
+		mov	ax, cs
+		mov	sp, 2000h	; (offset FATBUF)
+		mov	ss, ax
+%else
 		mov	ax, _SS
 		mov	ss, ax
 		mov	sp, _SP
+%endif
+		sti
 		xor	ax, ax
 		mov	ds, ax
 		mov	al, [DISK_BOOT]	; DA/UA
@@ -310,7 +357,12 @@ cluster_next:   lodsw                           ; AX = next cluster to read
 
 
 boot_error:	call	print
-		db	10, "err!",0
+%ifdef PRINT_WITH_LF
+		db	10
+%else
+		db	' '
+%endif
+		db	"Err!",0
 
 		xor	ah, ah
 		int	18h			; wait for a key
@@ -330,6 +382,9 @@ boot_success:
 		db	" GO! ",0
 		;mov	bl, [bsDriveNumber]
 	%endif
+	%ifdef NEC98HDD
+		mov	si, [BOOTPART_SCRATCHPAD]
+	%endif
 		jmp	word LOADSEG:0
 
 
@@ -345,10 +400,13 @@ print:
 		lodsb
 		or	al, al
 		jz	.end
+%ifdef PRINT_WITH_LF
 		cmp	al, 10	; LF
 		jz	.lf
+%endif
 		stosw
 		jmp	short .loop
+%ifdef PRINT_WITH_LF
 	.lf:
 		mov	ax, di
 		mov	dl, 80 * 2
@@ -357,6 +415,7 @@ print:
 		mul	dl
 		mov	di, ax
 		jmp	short .loop
+%endif
 	.end:
 		mov	[.vram_off], di
 		mov	dx, di
@@ -439,7 +498,7 @@ readDisk:
 	mov	al, byte [bsHeads]
 	mov	cx, [bsSecPerTrack]
 	mul	cl
-	mov	bp, ax		; bx = s * h
+	xchg	ax, bp		; bp = s * h
 	pop	ax
 	div	bp
 	mov	[.rd_c], al
@@ -449,13 +508,38 @@ readDisk:
 	mov	dl, ah
 	mov	ah, 46h			; READ DATA: MFM, err-retry
 	mov	cx, [.rd_c]
+  %ifdef FD_DBLBUF
+	or	ah, 10h			; with SEEK (always: to shrink code size)
+  %else
 	cmp	cl, [.rd_cp]
 	je	short .rd1s_2
-	or	ah, 10h			; with SEEK
+	or	ah, 10h			; with SEEK (if needed)
 	mov	[.rd_cp], cl
 .rd1s_2:
+  %endif
 	;mov	dx, [.rd_s]
 	inc	dl
+  %ifdef FD_DBLBUF
+	push	si
+	push	di
+	push	ds
+	mov	di, bx
+	mov	bx, [sysPhysicalBPS]
+	push	es
+	; read into the temporary buffer (to avoid DMA 64K-boundary overrun)
+	les	bp, [.fdbuf_dw]
+	mov	al, [bsDriveNumber]	; DA/UA
+	int	1bh
+	pop	es
+	;jc	.rd1s_exit
+	mov	cx, bx
+	lds	si, [.fdbuf_dw]
+	rep	movsb
+.rd1s_exit:
+	pop	ds
+	pop	di
+	pop	si
+  %else
 	mov	bp, [sysPhysicalBPS]
 	xchg	bx, bp
 	;mov	bx, [sysPhysicalBPS]
@@ -463,6 +547,7 @@ readDisk:
 .rd1s_2x:
 	mov	al, [bsDriveNumber]	; DA/UA
 	int	1bh
+  %endif
 %if 0
 	jnc	.rd1s_exit	; Init Device when error.
 	mov	ah, 3
@@ -478,6 +563,9 @@ readDisk:
 	pop	ax
 	ret
 
+.fdbuf_dw:
+.fdbuf_off	dw	0
+.fdbuf_seg	dw	FDBUFSEG
 .rd_cp		db	0
 .rd_c		db	0
 .rd_sl		db	(256 - 7 - 1)
@@ -485,6 +573,17 @@ readDisk:
 ;.rd_h		db	0
 %endif
 %ifdef NEC98HDD
+    %if 1
+		mov	cx, [bsBytesPerSec]
+	.adj_scale_l0:
+		cmp	cx, [sysPhysicalBPS]
+		jbe	.read_next
+		add	di, di
+		add	ax, ax
+		adc	dx, dx
+		shr	cx, 1
+		jmp	short .adj_scale_l0
+    %else
 		push	dx
 		push	ax
 		xor	dx, dx
@@ -496,6 +595,7 @@ readDisk:
 		pop	ax
 		pop	dx
 		mul	cx
+    %endif
 
 	.read_next:
 		push	dx
@@ -542,12 +642,11 @@ readDisk:
 
 		clc
 		ret
-%else
-		stc
-		ret
 %endif
+
+
+		_org	(512 - 2 - 11)
 
 filename	db	"KERNEL  SYS"
 
-		times	512 - $ + $$ db 0
-
+		dw	0aa55h			; signature

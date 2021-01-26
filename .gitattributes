@@ -1,0 +1,5 @@
+fdformat.txt text working-tree-encoding=CP932 eol=crlf
+#
+src/fdformat.c text working-tree-encoding=CP932
+src/int86x2.h text working-tree-encoding=CP932
+src/int86x2.nas text working-tree-encoding=CP932

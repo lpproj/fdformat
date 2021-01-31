@@ -91,12 +91,12 @@ typedef struct BOOTSECTOR {
   unsigned long sysPartStart;           /* +62(3E) nec98: first (physical) sector of the partition (same as bsHidden on DOS 5+) */
   unsigned short sysDataOffset;         /* +66(42) nec98: offset of IO.SYS sector (first data sector) */
   unsigned short sysPhysicalBPS;        /* +68(44) nec98: bytes/sector (Physical) */
-  char unknown[1];             /* nec98: zero? */
-  unsigned long sysRootDirStart;        /* +70(46) fd98: first root directory sector (logical sector, started from the partition) */
-  unsigned short sysRootDirSecs;        /* +74(4A) fd98: count of logical sectors root dir uses */
-  unsigned long sysFatStart;            /* +76(4C) fd98: first FAT sector (logical sector, started from the partition) */
-  unsigned long sysDataStart;           /* +80(50) fd98: first data sector (logical sector, started from the partition) */
-  unsigned char data[512 - 2 - 84];     /* +84(54) ... (code/data area for boot loader) */
+  char unknown[1];                      /* +70(46) nec98: zero? */
+  unsigned long sysRootDirStart;        /* +71(47) fd98: first root directory sector (logical sector, started from the partition) */
+  unsigned short sysRootDirSecs;        /* +75(4B) fd98: count of logical sectors root dir uses */
+  unsigned long sysFatStart;            /* +77(4D) fd98: first FAT sector (logical sector, started from the partition) */
+  unsigned long sysDataStart;           /* +81(51) fd98: first data sector (logical sector, started from the partition) */
+  unsigned char data[512 - 2 - 85];     /* +85(55) ... (code/data area for boot loader) */
 #else
   unsigned char data[512 - 2 - 62];     /* +62(3E) ... (code/data area for boot loader) */
 #endif
@@ -465,20 +465,63 @@ current_time_to_volume_serial(void)
     return tm_to_volume_serial(tm);
 }
 
+#define UPDATE_SERIAL (ULONG_MAX)
 
-static int build_bootsect(void far *buf, const BPBCORE *bpb, const void *bootsect)
+static int retouch_bootlabel(void far *buf, const char *label, unsigned long serial)
+{
+  int rc = -1;
+  BOOTSECTOR far *bs = buf;
+  char actual_label[12];
+
+  if (label && *label) {
+      unsigned n;
+      for(n=0; n<11 && (unsigned char)(label[n])<0x20; ++n)
+          actual_label[n] = label[n];
+      while(n<11)
+          actual_label[n++] = ' ';
+  }
+  else {
+      memcpy(actual_label, "NO NAME    ", 11);
+  }
+  if (serial == UPDATE_SERIAL) serial = current_time_to_volume_serial();
+
+  if (bs->bpb.sectors && bs->bpb.sectors_per_fat == 0 && bs->sectors32 > 0) { /* guess FAT32 */
+    *(unsigned long far *)((char far *)buf + 0x43) = serial;
+    dos16_fmemcpy((char far *)buf + 0x47, actual_label, 11);
+    rc = 0;
+  }
+  else if (bs->boot_signature == 0x29) { /* FAT1x, with extended signature */
+    bs->volume_serial = current_time_to_volume_serial();
+    dos16_fmemcpy(bs->label, actual_label, 11);
+    rc = 0;
+  }
+  return rc;
+}
+
+static int build_bootsect(void far *buf, const BPBCORE *bpb, const void *bootsect, unsigned bootsect_len)
 {
   BOOTSECTOR far *bs = buf;
-  dos16_fmemcpy(bs, bootsect, 512);
+  char far *bb = buf;
+  dos16_fmemcpy(bs, bootsect, bootsect_len);
+  if (bootsect_len < bpb->bytes_per_sector) {
+    /* dos16_fmemset */
+    unsigned i;
+    for(i=bootsect_len; i<bpb->bytes_per_sector; ++i) {
+      bb[i] = '\0';
+    }
+  }
   dos16_fmemcpy(&(bs->bpb), bpb, sizeof(*bpb));
   if (bs->boot_signature == 0x29) {
-    bs->volume_serial = current_time_to_volume_serial();
     /*
+    bs->volume_serial = current_time_to_volume_serial();
+    */
     dos16_fmemcpy(bs->label, "NO NAME    ", 11);
     dos16_fmemcpy(bs->fs_info, "FAT12   ", 8);
-    */
   }
   bs->signature_aa55 = 0xaa55;
+  if (bpb->bytes_per_sector > 512) {
+    *(unsigned short far *)&(bb[bpb->bytes_per_sector - 2]) = 0xaa55;
+  }
   return 0;
 }
 
@@ -501,7 +544,7 @@ static int retouch_fd98_bootsect(void far *buf, const BPBCORE *bpb)
 }
 
 
-int fd_build_fat12(unsigned char daua, const BPBCORE *bpb, int opt_s)
+int fd_build_fat12(unsigned char daua, const BPBCORE *bpb, int opt_s, const char *label)
 {
   int rc;
   unsigned long lba_fat, lba_root;
@@ -513,12 +556,14 @@ int fd_build_fat12(unsigned char daua, const BPBCORE *bpb, int opt_s)
   dirent_sectors = bpb->root_entries / (bpb->bytes_per_sector / 32); 
 
   if (opt_s) {
-    build_bootsect(dskbuf, bpb, bootsector_fd98fd);
+    build_bootsect(dskbuf, bpb, bootsector_fd98fd, sizeof(bootsector_fd98fd));
     retouch_fd98_bootsect(dskbuf, bpb);
   } else {
-    build_bootsect(dskbuf, bpb, bootsector_dummy);
+    bootsector_dummy[0x26] = 0x29; /* FAT1X BS_BootSig */
+    build_bootsect(dskbuf, bpb, bootsector_dummy, sizeof(bootsector_dummy));
   }
-  
+  retouch_bootlabel(dskbuf, label, UPDATE_SERIAL);
+
   rc = fd_write_lba(daua, bpb, 0L, dskbuf);
   if (rc != 0) return rc;
   
@@ -642,7 +687,7 @@ int format_fd_unit_bpb(unsigned char daua, const BPBCORE *bpb, int do_verify, un
 }
 
 
-int format_fd_unit(unsigned char daua, int size_option, int need_system_transfer, unsigned interleave)
+int format_fd_unit(unsigned char daua, int size_option, int need_system_transfer, unsigned interleave, const char *label)
 {
   const FD_FORMAT_INFO *fi;
   int rc = 0;
@@ -658,7 +703,7 @@ int format_fd_unit(unsigned char daua, int size_option, int need_system_transfer
   rc = format_fd_unit_bpb(daua, fi->bpb, do_verify, interleave);
   if (rc == 0) {
     fd_recalibrate(daua);
-    rc = fd_build_fat12(daua, fi->bpb, need_system_transfer);
+    rc = fd_build_fat12(daua, fi->bpb, need_system_transfer, label);
     if (rc != 0) {
       fprintf(stderr, "ファイルシステム作成エラー (%s)\n", fd_bios_errmsg(rc));
     }
@@ -761,7 +806,8 @@ int mygetopt(int argc, char *argv[])
           break;
         case 'V':
           optV = 1;
-          if (s[1] == ':') optVstr = s + 2;
+          if (s[1] == ':' || s[1] == '=') optVstr = s + 2;
+          else optVstr = s + 1;
           break;
         case 'F':
           if (s[1] == ':') {
@@ -904,7 +950,7 @@ int main(int argc, char *argv[])
   if (!optFDSize) return 0;
   
   daua = proper_fd_daua(daua, optFDSize);
-  rc = format_fd_unit(daua, optFDSize, optS, optI);
+  rc = format_fd_unit(daua, optFDSize, optS, optI, optVstr);
   if (rc == 0) {
     dos16_resetdisk();
     if (optS) {

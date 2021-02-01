@@ -2,7 +2,7 @@
 ; a minimal chain-boot loader for IBMPC and NEC PC-9801/9821
 ; (from FD to 1st HD)
 %if 0
-  Copyright (C) 2015-2016 sava (t.ebisawa)
+  Copyright (C) 2015-2021 sava (t.ebisawa)
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -33,20 +33,25 @@ offset_nec98      equ 0         ; PC-98x1 1fe0:0000 (1fc0:0000 for FD)
 segment_bt2_nec98 equ 0060h
 DISK_RETRY        equ 3
 NEC98_BOOT_DRIVE  equ 0584h
-NEC98_DISK_EQUIP  equ 055dh
-
+NEC98_DISK_EQUIP  equ 055ch
+NEC98_DISK_EQUIPS equ 0482h
 
 boot0:
     jmp short boot1
     nop
     db  'BOOTSTUB'
     
+%if 1
+    ; (reserve space for FAT32)
+    times (0x5a - ($ - boot0)) db 0
+%else
     ;resb 0x3e - ($ - boot0)
     times (0x26 - ($ - boot0)) db 0
     db 29h            ; extended boot record
     dd 0deadbeefh     ; volume serial number
     db 'NO NAME    '  ; disk label
     db 'FAT     '     ; file system
+%endif
 boot1:
     cld
     mov cx, msgNoSystem_end - msgNoSystem
@@ -157,47 +162,78 @@ bootreal_nec98:
     ;pop ds
     xor ax, ax
     mov ds, ax
-    mov ah, [NEC98_DISK_EQUIP]  ; DISK_EQUIP
-    mov al, 80h
-    test ah, 1
-    jnz .bt_nec_ide
-    inc al
-    test ah, 2
-    jz .fall_nec98
-.bt_nec_ide:
-    mov [NEC98_BOOT_DRIVE], al
-    mov ah, 8eh                 ; hdd "half-height" mode
-    int 1bh           ; (undoc1:int1b_h.txt, undoc2:memsys.txt, disktut.txt)
-                      ; needed for real machines (with an IDE drive)...
     mov ax, 1fe0h
     mov es, ax        ; load at 1fe0:0000 (es:bp)
     xor bp, bp
     push ax           ; prepare to go (by retf)
     push bp
-    mov cx, DISK_RETRY
-.bt_nec_lp:
-    push cx
-    mov al, [NEC98_BOOT_DRIVE]
-    mov ah, 7
-    int 1bh
-    mov ah, 06h
-    xor cx, cx
-    xor dx, dx
-    mov bx, 512
-    int 1bh
-    pop cx
+    mov ah, [NEC98_DISK_EQUIPS] ; DISK_EQUIPS (SCSI-HD:bit 6~0)
+    mov al, 0a0h
+    call nec98_read_ipl
     jnc .bt_nec_go
-    loop .bt_nec_lp
+    mov ax, [NEC98_DISK_EQUIP]  ; DISK_EQUIP (SASI-HD:bit 12~8)
+    and ah, 0fh
+    mov al, 80h
+    call nec98_read_ipl
+    jc .fall_nec98
+.bt_nec_go:
+    retf                ; jmp to the top (1fe0:0000)
 .fall_nec98:
     cli
     cld
     xor ax, ax
-    mov ds, ax
+    ;mov ds, ax
     mov es, ax
     mov dx, [0486h]   ; for a proof: restore DX (initial value after reset)
     jmp 0f000h:0fff0h ; 0ffffh:0000h for old 8086/186
-.bt_nec_go:
-    retf                ; jmp to the top (1fe0:0000)
+;
+nec98_read_ipl:
+    mov word [es: bp + 4], ax   ; erase "IPL1" mark in the buffer (to be safe)
+    push ax
+    mov ah, 8eh         ; hdd "half-height" mode
+    int 1bh             ; (undoc1:int1b_h.txt, undoc2:memsys.txt, disktut.txt)
+                        ; needed for real machines (with an IDE drive)...
+    pop ax
+.lp0:
+    push ax
+    test ah, 1
+    jz .next
+    mov cx, DISK_RETRY
+.lp_read:
+    mov ah, 7           ; RECALIBRATE (seek to the first cylinder)
+    int 1bh
+    push bx
+    push cx
+    ;push dx
+    mov ah, 6           ; READ
+    mov bx, 512
+    xor cx, cx
+    xor dx, dx
+    int 1bh
+    ;pop dx
+    pop cx
+    pop bx
+    jnc .ck_ipl
+    loop .lp_read
+    jmp short .next
+.ck_ipl:
+    cmp word [es: bp + 4], 5049h    ; "IP"
+    jne .next
+    cmp word [es: bp + 6], 314ch    ; "L1"
+    jne .next
+;.ipl_found:
+    pop ax
+    mov [NEC98_BOOT_DRIVE], al
+    clc
+    ret
+.next:
+    pop ax
+    inc al
+    shr ah, 1
+    jnz .lp0
+;.exit_err:
+    stc
+    ret
 bootreal_nec98_end:
 
 msgNoSystem db 'No System Disk. Press any key to boot up from HD...'

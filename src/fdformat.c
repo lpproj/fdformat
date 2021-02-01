@@ -1,7 +1,7 @@
 /*
   fdformat: simple floppy disk formatter for FreeDOS(98).
   
-  Copyright (C) 2015-2016 sava (t.ebisawa)
+  Copyright (C) 2015-2021 sava (t.ebisawa)
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages

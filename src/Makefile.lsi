@@ -29,6 +29,10 @@ COMPRESS=upx -9 --8086 --no-color
 
 all: fdformat.exe
 
+allclean:
+	-$(RM_F) fdformat.exe $(OBJS)
+	-$(RM_F) bin2list$(X) b_fat12f.h b_fat12f.bin bootdumy.h bootdumy.bin bootdumy.lst
+
 clean:
 	-$(RM_F) fdformat.exe $(OBJS)
 
@@ -54,12 +58,12 @@ int86x2.$(O): int86x2.nas
 
 
 bootdumy.h: bootdumy.asm bin2list$(X)
-	nasm -f bin -o bootdumy.bin bootdumy.asm
-	./bin2list bootdumy.bin $@
+	nasm -f bin -o bootdumy.bin -l bootdumy.lst bootdumy.asm
+	./bin2list$(X) bootdumy.bin $@
 
 b_fat12f.h: $(FD98_BOOTASM)
 	nasm -f bin -o b_fat12f.bin -O3 -DNEC98 -DISFAT12 -DNEC98FDD $<
-	./bin2list b_fat12f.bin $@
+	./bin2list$(X) b_fat12f.bin $@
 
 bin2list$(X): bin2list.c
 	$(CC) -o $@ $< $(LDFLAGS)

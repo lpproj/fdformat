@@ -54,7 +54,9 @@ boot0:
 %endif
 boot1:
     cld
-    mov cx, msgNoSystem_end - msgNoSystem
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
     ; detect machine which is PC-98x1/IBM by int 1Ah
     ; (need more bytes than by int 10h ah=0Fh, but probably safer...)
     mov dh, 0ffh
@@ -68,10 +70,8 @@ boot1:
     je boot1_nec98
 
 boot1_ibmpc:
-    xor ax, ax
-    mov ds, ax
-    mov es, ax
     mov si, msgNoSystem + offset_ibmpc
+    mov cx, msgNoSystem_end - msgNoSystem
 .l1_ibm:
     lodsb
     mov ah, 0eh
@@ -94,14 +94,19 @@ boot1_ibmpc:
     
 ;
 boot1_nec98:
+    mov ax, 0a000h              ; normal
+    test byte [0501h], 8
+    jz .l2
+    mov ah, 0e0h                ; hi-res
+.l2:
+    mov es, ax
     push cs
     pop ds
     mov ah, 0ch         ; show screen
     int 18h
-    mov ax, 0a000h
-    mov es, ax
     xor di, di
     mov si, msgNoSystem + offset_nec98
+    mov cx, msgNoSystem_end - msgNoSystem
     xor ah, ah
 .lp_nec:
     lodsb
